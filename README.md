@@ -2,6 +2,19 @@
 
 AI Learning Coach is a Go and Vue platform for adaptive technical learning. It builds daily sessions from learner mastery, teaches through structured lessons, evaluates mixed quizzes, schedules spaced review, indexes private study material, and conducts stateful system-design interviews.
 
+## Implementation status
+
+This repository was rebuilt from a disconnected TypeScript prototype into a runnable Go/Vue learning platform. The inherited code, completed work, verification evidence, feature-by-feature status, and remaining production gates are documented in the [implementation report](docs/implementation-report.md).
+
+| Area | Status |
+|---|---|
+| Go API, learning policies, quizzes, interviews, and local workflows | Runnable |
+| Vue learner application and real API integration | Runnable |
+| PostgreSQL/pgvector schema and tenant RLS policies | Implemented and migration-tested |
+| OpenAPI, AsyncAPI, Compose, Kubernetes, Terraform, and CI foundations | Implemented |
+| Production PostgreSQL/outbox/SQS/S3 runtime adapters | Remaining production gate |
+| Binary document extraction, scanning, embeddings, and notification delivery | Remaining production gate |
+
 ## Architecture
 
 - `backend/`: Go API and worker, clean domain/application/adapter boundaries, workflow state machines, Auth0 JWT validation, model gateway, learning policies, RAG, interviews, and PostgreSQL migrations.
@@ -68,8 +81,8 @@ Copy `.env.example` and set only non-secret local values. Production secrets bel
 - `DATABASE_URL`, `REDIS_URL`, queue names, object bucket, and AWS region
 - `VITE_API_URL` and the opt-in `VITE_DEMO_MODE`
 
-See [architecture](docs/architecture.md), [deployment runbook](docs/runbooks/deployment.md), and the contracts in [`api/`](api/) for details.
+See the [implementation report](docs/implementation-report.md), [architecture](docs/architecture.md), [deployment runbook](docs/runbooks/deployment.md), and contracts in [`api/`](api/) for details.
 
 ## Current delivery boundary
 
-The repository now supplies the product-shaped learning loop, contracts, UI, policies, security boundaries, and infrastructure foundation. Before a production launch, complete and load-test the PostgreSQL/outbox/SQS/object-storage adapters, isolated binary document extraction and malware scanning, provider failover, notification delivery, and deployment-specific IAM/ingress wiring described in the runbooks.
+The repository now supplies the product-shaped learning loop, contracts, UI, policies, security boundaries, and infrastructure foundation. Before a production launch, complete and load-test the PostgreSQL/outbox/SQS/object-storage adapters, isolated binary document extraction and malware scanning, provider failover, notification delivery, and deployment-specific IAM/ingress wiring described in the [implementation report](docs/implementation-report.md#remaining-production-gates) and runbooks.
