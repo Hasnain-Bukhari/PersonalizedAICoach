@@ -1,0 +1,21 @@
+import axios from 'axios';
+
+const verifyCurl = async () => {
+  try {
+    const response1 = await axios.get('http://example.com/api/endpoint1');
+    console.log(response1.data);
+
+    const response2 = await axios.post('http://example.com/api/endpoint2', { key: 'value' });
+    console.log(response2.data);
+
+    const response3 = await axios.put('http://example.com/api/endpoint3', { key: 'value' });
+    console.log(response3.data);
+
+    const response4 = await axios.delete('http://example.com/api/endpoint4');
+    console.log(response4.data);
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+verifyCurl();
