@@ -3,19 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "dev:frontend": "pnpm --filter frontend dev",
-    "dev:backend": "pnpm --filter backend dev",
-    "build": "pnpm --recursive build",
-    "lint": "eslint . --ext .ts,.vue --fix",
-    "format": "prettier --write \"**/*.{ts,vue,json,css,md}\""
+    "dev": "concurrently -n web,api \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "cd backend && go run ./cmd/api",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "cd backend && go build ./...",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "npm --prefix frontend test",
+    "test:backend": "cd backend && go test ./...",
+    "lint": "npm --prefix frontend run lint && cd backend && go vet ./...",
+    "format": "prettier --write \"frontend/**/*.{ts,vue,json,css,md}\" \"api/**/*.{yaml,yml}\" \"docs/**/*.md\""
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
     "concurrently": "^8.2.2",
-    "eslint": "^8.56.0",
     "prettier": "^3.1.1"
   },
   "engines": {

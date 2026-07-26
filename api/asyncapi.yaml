@@ -1,0 +1,73 @@
+asyncapi: 3.0.0
+info:
+  title: AI Learning Coach Streaming API
+  version: 1.0.0
+  description: SSE notifications and resumable bidirectional interview WebSocket events.
+servers:
+  local:
+    host: localhost:8080
+    protocol: http
+channels:
+  userEvents:
+    address: /api/v1/events/stream
+    description: Authenticated SSE stream. Clients resume using Last-Event-ID.
+    messages:
+      workflowEvent: { $ref: '#/components/messages/WorkflowEvent' }
+  interviewStream:
+    address: /api/v1/interview/stream
+    description: WebSocket upgraded with interview_id and optional after_sequence query parameters.
+    messages:
+      interviewClientEvent: { $ref: '#/components/messages/InterviewClientEvent' }
+      interviewServerEvent: { $ref: '#/components/messages/InterviewServerEvent' }
+operations:
+  receiveUserEvents:
+    action: receive
+    channel: { $ref: '#/channels/userEvents' }
+  sendInterviewInput:
+    action: send
+    channel: { $ref: '#/channels/interviewStream' }
+    messages: [{ $ref: '#/channels/interviewStream/messages/interviewClientEvent' }]
+  receiveInterviewOutput:
+    action: receive
+    channel: { $ref: '#/channels/interviewStream' }
+    messages: [{ $ref: '#/channels/interviewStream/messages/interviewServerEvent' }]
+components:
+  messages:
+    WorkflowEvent:
+      payload: { $ref: '#/components/schemas/EventEnvelope' }
+      bindings:
+        http:
+          headers:
+            type: object
+            properties: { Last-Event-ID: { type: integer, minimum: 0 } }
+    InterviewClientEvent:
+      payload: { $ref: '#/components/schemas/InterviewClientEnvelope' }
+    InterviewServerEvent:
+      payload: { $ref: '#/components/schemas/EventEnvelope' }
+  schemas:
+    EventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, workflow_id, sequence, timestamp, payload]
+      properties:
+        event_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [workflow.planning, workflow.retrieving, workflow.lesson_generation, workflow.quiz_generation, workflow.validation, workflow.published, workflow.notified, workflow.failed, notification.created, interview.message, interview.state_changed, interview.scored, error]
+        workflow_id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        timestamp: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+    InterviewClientEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, interview_id, sequence, timestamp, payload]
+      properties:
+        event_id: { type: string, format: uuid }
+        type: { type: string, enum: [candidate.message, candidate.finish, client.ack, client.ping] }
+        interview_id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1, description: Monotonically increasing client sequence used for deduplication. }
+        timestamp: { type: string, format: date-time }
+        payload:
+          type: object
+          properties: { content: { type: string, maxLength: 20000 }, acknowledged_sequence: { type: integer, minimum: 0 } }

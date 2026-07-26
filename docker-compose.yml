@@ -1,16 +1,98 @@
-version: '3.8'
+name: ai-learning-coach
 
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "3000:3000"
+  postgres:
+    image: pgvector/pgvector:pg16
     environment:
-      - NODE_ENV=development
+      POSTGRES_DB: ${POSTGRES_DB:-coach}
+      POSTGRES_USER: ${POSTGRES_USER:-coach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coach_local_only}
+    ports: ["5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "8080:8080"
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-coach}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-coach_local_only}
+      MC_HOST_local: http://${MINIO_ROOT_USER:-coach}:${MINIO_ROOT_PASSWORD:-coach_local_only}@localhost:9000
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  create-bucket:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     depends_on:
-      - backend
+      minio: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing local/coach-documents &&
+        mc anonymous set none local/coach-documents
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-coach}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-coach_local_only}
+    restart: "no"
+
+  mailpit:
+    image: axllent/mailpit:v1.26
+    ports: ["1025:1025", "8025:8025"]
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+
+  elasticmq:
+    image: localstack/localstack:4.4
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      EAGER_SERVICE_LOADING: "1"
+    ports: ["4566:4566"]
+    volumes:
+      - ./infrastructure/localstack/init/ready.d:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      test: [CMD, curl, -f, "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  model:
+    image: vllm/vllm-openai:v0.8.5
+    profiles: [model]
+    command: [--model, "${MODEL_ID:-Qwen/Qwen2.5-1.5B-Instruct}", --host, 0.0.0.0, --port, "8000"]
+    ports: ["8000:8000"]
+    volumes: ["model-cache:/root/.cache/huggingface"]
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - { driver: nvidia, count: 1, capabilities: [gpu] }
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  model-cache:

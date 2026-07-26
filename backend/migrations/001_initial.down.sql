@@ -1,0 +1,3 @@
+BEGIN;
+DROP TABLE IF EXISTS notifications,outbox_events,agent_runs,streak_snapshots,user_badges,badges,xp_ledger,study_events,memory_entries,lesson_sources,document_chunks,documents,interview_scorecards,interview_messages,interview_runs,revision_events,revision_items,question_responses,quiz_attempts,quiz_questions,quizzes,lessons,session_steps,daily_sessions,workflow_instances,user_knowledge_nodes,topic_prerequisites,topics,domains,notification_preferences,goals,user_preferences,users CASCADE;
+COMMIT;

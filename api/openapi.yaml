@@ -1,0 +1,450 @@
+openapi: 3.1.0
+info:
+  title: AI Learning Coach API
+  version: 1.0.0
+  description: Contract for authenticated learning, assessment, interview, knowledge, analytics, and profile operations.
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - bearerAuth: []
+tags:
+  - { name: Health }
+  - { name: Sessions }
+  - { name: Quizzes }
+  - { name: Interviews }
+  - { name: Knowledge }
+  - { name: Analytics }
+  - { name: Profile }
+  - { name: Events }
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      security: []
+      operationId: health
+      responses:
+        '200': { description: Process is alive, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /readyz:
+    get:
+      tags: [Health]
+      security: []
+      operationId: readiness
+      responses:
+        '200': { description: Dependencies are ready, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /sessions/daily:
+    get:
+      tags: [Sessions]
+      operationId: getDailySession
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Published session, content: { application/json: { schema: { $ref: '#/components/schemas/DailySession' } } } }
+        '202': { description: Generation was started, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowStatus' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200': { description: Session, content: { application/json: { schema: { $ref: '#/components/schemas/DailySession' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /sessions/{sessionId}/complete:
+    post:
+      tags: [Sessions]
+      operationId: completeSession
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: '#/components/schemas/CompleteSessionRequest' } } } }
+      responses:
+        '200': { description: Completed session, content: { application/json: { schema: { $ref: '#/components/schemas/DailySession' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /quiz/{quizId}/submit:
+    post:
+      tags: [Quizzes]
+      operationId: submitQuiz
+      parameters:
+        - in: path
+          name: quizId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/QuizSubmission' } } } }
+      responses:
+        '200': { description: Evaluation, content: { application/json: { schema: { $ref: '#/components/schemas/QuizResult' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /interviews:
+    post:
+      tags: [Interviews]
+      operationId: createInterview
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateInterviewRequest' } } } }
+      responses:
+        '201': { description: Created interview, content: { application/json: { schema: { $ref: '#/components/schemas/Interview' } } } }
+  /interviews/{interviewId}:
+    get:
+      tags: [Interviews]
+      operationId: getInterview
+      parameters: [{ $ref: '#/components/parameters/InterviewId' }]
+      responses:
+        '200': { description: Interview and transcript, content: { application/json: { schema: { $ref: '#/components/schemas/Interview' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /interviews/{interviewId}/scorecard:
+    get:
+      tags: [Interviews]
+      operationId: getInterviewScorecard
+      parameters: [{ $ref: '#/components/parameters/InterviewId' }]
+      responses:
+        '200': { description: Final scorecard, content: { application/json: { schema: { $ref: '#/components/schemas/InterviewScorecard' } } } }
+        '409': { description: Interview is not scored, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /interview/stream:
+    get:
+      tags: [Interviews]
+      operationId: interviewWebSocket
+      description: Upgrade to WebSocket. Frames conform to `asyncapi.yaml`; resume with `after_sequence`.
+      parameters:
+        - in: query
+          name: interview_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: after_sequence
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '101': { description: Switching Protocols }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /knowledge/upload:
+    post:
+      tags: [Knowledge]
+      operationId: uploadDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                title: { type: string, maxLength: 255 }
+      responses:
+        '202': { description: Ingestion accepted, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } }
+        '413': { description: File too large, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '415': { description: Unsupported media type, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /knowledge/documents:
+    get:
+      tags: [Knowledge]
+      operationId: listDocuments
+      responses:
+        '200': { description: User document library, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Document' } } } } }
+  /knowledge/documents/{documentId}:
+    parameters: [{ $ref: '#/components/parameters/DocumentId' }]
+    get:
+      tags: [Knowledge]
+      operationId: getDocument
+      responses:
+        '200': { description: Document ingestion state, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Knowledge]
+      operationId: deleteDocument
+      responses:
+        '204': { description: Soft-deleted and purge scheduled }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /analytics/graph:
+    get:
+      tags: [Analytics]
+      operationId: getKnowledgeGraph
+      responses:
+        '200': { description: Curriculum DAG with learner state, content: { application/json: { schema: { $ref: '#/components/schemas/KnowledgeGraph' } } } }
+  /analytics/overview:
+    get:
+      tags: [Analytics]
+      operationId: getAnalyticsOverview
+      responses:
+        '200': { description: Learner analytics, content: { application/json: { schema: { $ref: '#/components/schemas/AnalyticsOverview' } } } }
+  /analytics/activity:
+    get:
+      tags: [Analytics]
+      operationId: getActivity
+      parameters:
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+      responses:
+        '200': { description: Daily activity, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ActivityDay' } } } } }
+  /profile/preferences:
+    get:
+      tags: [Profile]
+      operationId: getPreferences
+      responses:
+        '200': { description: Preferences, content: { application/json: { schema: { $ref: '#/components/schemas/UserPreferences' } } } }
+    put:
+      tags: [Profile]
+      operationId: replacePreferences
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserPreferencesInput' } } } }
+      responses:
+        '200': { description: Updated preferences, content: { application/json: { schema: { $ref: '#/components/schemas/UserPreferences' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /events/stream:
+    get:
+      tags: [Events]
+      operationId: streamEvents
+      description: Server-Sent Events conforming to `asyncapi.yaml`. Resume via Last-Event-ID.
+      parameters:
+        - in: header
+          name: Last-Event-ID
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT, description: Auth0 access token }
+  parameters:
+    SessionId: { in: path, name: sessionId, required: true, schema: { type: string, format: uuid } }
+    InterviewId: { in: path, name: interviewId, required: true, schema: { type: string, format: uuid } }
+    DocumentId: { in: path, name: documentId, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Unauthorized: { description: Missing or invalid access token, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    NotFound: { description: Resource not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Conflict: { description: State or idempotency conflict, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ValidationFailed: { description: Request validation failed, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    RateLimited: { description: Rate limit exceeded, headers: { Retry-After: { schema: { type: integer } } }, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ServiceUnavailable: { description: Dependency unavailable, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [ok, degraded] }, checks: { type: object, additionalProperties: { type: string } } }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        code: { type: string }
+        trace_id: { type: string }
+        errors: { type: array, items: { $ref: '#/components/schemas/FieldError' } }
+    FieldError:
+      type: object
+      required: [field, code]
+      properties: { field: { type: string }, code: { type: string }, message: { type: string } }
+    WorkflowStatus:
+      type: object
+      required: [workflow_id, state, updated_at]
+      properties:
+        workflow_id: { type: string, format: uuid }
+        state: { type: string, enum: [scheduled, planning, retrieving, lesson_generation, quiz_generation, validation, published, notified, failed] }
+        updated_at: { type: string, format: date-time }
+        retry_after_seconds: { type: integer, minimum: 1 }
+    DailySession:
+      type: object
+      required: [id, date, status, workflow_id, estimated_minutes, objectives, lesson, quiz, reflection, homework, preview, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        status: { type: string, enum: [published, in_progress, completed] }
+        workflow_id: { type: string, format: uuid }
+        estimated_minutes: { type: integer, minimum: 1 }
+        objectives: { type: array, items: { type: string } }
+        lesson: { $ref: '#/components/schemas/Lesson' }
+        quiz: { $ref: '#/components/schemas/Quiz' }
+        reflection: { type: string }
+        homework: { type: string }
+        preview: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Lesson:
+      type: object
+      required: [id, topic, objectives, simple, real_world, advanced, diagram, best_practices, pitfalls, cheat_sheet, confidence, citations]
+      properties:
+        id: { type: string, format: uuid }
+        topic: { type: string }
+        objectives: { type: array, items: { type: string } }
+        simple: { type: string }
+        real_world: { type: string }
+        advanced: { type: string }
+        diagram: { type: string }
+        best_practices: { type: string }
+        pitfalls: { type: string }
+        cheat_sheet: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        citations: { type: array, items: { $ref: '#/components/schemas/Citation' } }
+    Citation:
+      type: object
+      required: [document_id, chunk_id, title, locator]
+      properties:
+        document_id: { type: string, format: uuid }
+        chunk_id: { type: string, format: uuid }
+        title: { type: string }
+        locator: { type: string }
+        quote: { type: string }
+    Quiz:
+      type: object
+      required: [id, questions]
+      properties:
+        id: { type: string, format: uuid }
+        questions: { type: array, items: { $ref: '#/components/schemas/QuizQuestion' } }
+    QuizQuestion:
+      type: object
+      required: [id, type, prompt, topic]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [multiple_choice, true_false, scenario, coding, diagram_interpretation, fill_blank] }
+        prompt: { type: string }
+        options: { type: array, items: { type: string } }
+        topic: { type: string }
+    CompleteSessionRequest:
+      type: object
+      properties:
+        confidence: { type: number, minimum: 0, maximum: 100 }
+        reflection: { type: string, maxLength: 4000 }
+        idempotency_key: { type: string, maxLength: 128 }
+    QuizSubmission:
+      type: object
+      required: [answers]
+      properties:
+        answers: { type: array, items: { $ref: '#/components/schemas/QuizAnswer' }, minItems: 1 }
+        confidence: { type: number, minimum: 0, maximum: 100 }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+    QuizAnswer:
+      type: object
+      required: [question_id, value]
+      properties:
+        question_id: { type: string, format: uuid }
+        value: { description: Scalar, selected option IDs, code, or diagram interpretation }
+    QuizResult:
+      type: object
+      required: [attempt_id, score, results, mastery_changes, xp_awarded]
+      properties:
+        attempt_id: { type: string, format: uuid }
+        score: { type: number, minimum: 0, maximum: 100 }
+        results: { type: array, items: { $ref: '#/components/schemas/EvaluatedAnswer' } }
+        mastery_changes: { type: array, items: { $ref: '#/components/schemas/MetricChange' } }
+        xp_awarded: { type: integer, minimum: 0 }
+    EvaluatedAnswer:
+      type: object
+      required: [question_id, correct, explanation, misconceptions]
+      properties:
+        question_id: { type: string, format: uuid }
+        correct: { type: boolean }
+        explanation: { type: string }
+        misconceptions: { type: array, items: { type: string } }
+    MetricChange:
+      type: object
+      required: [topic, before, after, next_revision_due]
+      properties: { topic: { type: string }, before: { type: number }, after: { type: number }, next_revision_due: { type: string, format: date-time } }
+    RevisionChange:
+      type: object
+      required: [topic_id, next_revision_due]
+      properties: { topic_id: { type: string, format: uuid }, next_revision_due: { type: string, format: date-time }, ease_factor: { type: number, minimum: 1.3 } }
+    CreateInterviewRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt: { type: string, minLength: 3, maxLength: 1000 }
+    Interview:
+      type: object
+      required: [id, prompt, state, sequence, messages, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        prompt: { type: string }
+        state: { type: string, enum: [created, requirements, estimation, high_level_design, deep_dives, wrap_up, scored] }
+        sequence: { type: integer, minimum: 0 }
+        messages: { type: array, items: { $ref: '#/components/schemas/InterviewMessage' } }
+        created_at: { type: string, format: date-time }
+    InterviewMessage:
+      type: object
+      required: [sequence, role, content, at]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        role: { type: string, enum: [candidate, interviewer, system] }
+        content: { type: string }
+        at: { type: string, format: date-time }
+    InterviewScorecard:
+      type: object
+      required: [scalability, reliability, security, cost, communication, overall, strengths, improvements]
+      properties:
+        scalability: { type: number, minimum: 0, maximum: 100 }
+        reliability: { type: number, minimum: 0, maximum: 100 }
+        security: { type: number, minimum: 0, maximum: 100 }
+        cost: { type: number, minimum: 0, maximum: 100 }
+        communication: { type: number, minimum: 0, maximum: 100 }
+        overall: { type: number, minimum: 0, maximum: 100 }
+        strengths: { type: array, items: { type: string } }
+        improvements: { type: array, items: { type: string } }
+    Document:
+      type: object
+      required: [id, name, content_type, status, checksum, size, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        content_type: { type: string, enum: [application/pdf, text/markdown, text/plain, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.presentationml.presentation] }
+        status: { type: string, enum: [uploaded, scanning, extracting, chunking, embedding, indexed, requires_ocr, quarantined, failed, deleted] }
+        checksum: { type: string }
+        size: { type: integer, minimum: 0 }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+    KnowledgeGraph:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/KnowledgeNode' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/KnowledgeEdge' } }
+    KnowledgeNode:
+      type: object
+      required: [id, domain, topic_path, mastery, confidence, ease_factor, repetitions, attempts, last_interval_days, mistakes]
+      properties:
+        id: { type: string, format: uuid }
+        domain: { type: string }
+        topic_path: { type: string }
+        mastery: { type: number, minimum: 0, maximum: 100 }
+        confidence: { type: number, minimum: 0, maximum: 100 }
+        ease_factor: { type: number, minimum: 1.3 }
+        repetitions: { type: integer, minimum: 0 }
+        attempts: { type: integer, minimum: 0 }
+        last_interval_days: { type: integer, minimum: 0 }
+        mistakes: { type: array, items: { type: string } }
+        last_studied: { type: string, format: date-time }
+        next_revision_due: { type: string, format: date-time }
+    KnowledgeEdge:
+      type: object
+      required: [prerequisite_id, topic_id]
+      properties: { prerequisite_id: { type: string, format: uuid }, topic_id: { type: string, format: uuid } }
+    AnalyticsOverview:
+      type: object
+      required: [xp, streak, mastery, exam_readiness]
+      properties:
+        xp: { type: integer, minimum: 0 }
+        streak: { type: integer, minimum: 0 }
+        mastery: { type: number, minimum: 0, maximum: 100 }
+        exam_readiness: { type: number, minimum: 0, maximum: 100 }
+    ActivityDay:
+      type: object
+      required: [date, study_minutes, xp]
+      properties: { date: { type: string, format: date }, study_minutes: { type: integer, minimum: 0 }, xp: { type: integer, minimum: 0 } }
+    UserPreferencesInput:
+      type: object
+      required: [mode, timezone, session_minutes, daily_time, domains, email_notifications]
+      properties:
+        mode: { type: string }
+        timezone: { type: string, description: IANA timezone }
+        session_minutes: { type: integer, minimum: 10, maximum: 240 }
+        daily_time: { type: string, pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
+        domains: { type: array, uniqueItems: true, items: { type: string } }
+        email_notifications: { type: boolean }
+    UserPreferences:
+      $ref: '#/components/schemas/UserPreferencesInput'

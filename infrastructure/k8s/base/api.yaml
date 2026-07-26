@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coach-api
+spec:
+  replicas: 3
+  selector: { matchLabels: { app.kubernetes.io/name: coach-api } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: coach-api } }
+    spec:
+      serviceAccountName: coach-api
+      terminationGracePeriodSeconds: 30
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: api
+          image: coach-api:local
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - { configMapRef: { name: coach-config } }
+            - { secretRef: { name: coach-runtime } }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 3, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 10, periodSeconds: 20 }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "2", memory: 1Gi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coach-api
+spec:
+  selector: { app.kubernetes.io/name: coach-api }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: coach-api
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: coach-api }
+  minReplicas: 3
+  maxReplicas: 100
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }
+    scaleUp: { stabilizationWindowSeconds: 30 }
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coach-api
+spec:
+  minAvailable: 2
+  selector: { matchLabels: { app.kubernetes.io/name: coach-api } }

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: inference } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: inference } }
+    spec:
+      nodeSelector: { workload: inference, accelerator: nvidia }
+      tolerations: [{ key: nvidia.com/gpu, operator: Equal, value: "true", effect: NoSchedule }]
+      terminationGracePeriodSeconds: 120
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.8.5
+          args: [--model, Qwen/Qwen2.5-7B-Instruct, --host, 0.0.0.0, --port, "8000", --served-model-name, planning, teaching, assessment, interview]
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 60, periodSeconds: 10, failureThreshold: 30 }
+          resources:
+            requests: { cpu: "4", memory: 16Gi, nvidia.com/gpu: "1" }
+            limits: { cpu: "8", memory: 32Gi, nvidia.com/gpu: "1" }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: inference }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inference
+spec:
+  maxUnavailable: 0
+  selector: { matchLabels: { app.kubernetes.io/name: inference } }

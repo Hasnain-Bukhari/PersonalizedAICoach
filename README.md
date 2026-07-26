@@ -1,124 +1,75 @@
-# Personalized AI Coach Monorepo
+# AI Learning Coach
 
-A TypeScript monorepo for building a personalized AI coaching platform with Vue 3 frontend, Express backend, and shared DTOs.
+AI Learning Coach is a Go and Vue platform for adaptive technical learning. It builds daily sessions from learner mastery, teaches through structured lessons, evaluates mixed quizzes, schedules spaced review, indexes private study material, and conducts stateful system-design interviews.
 
-## Project Structure
+## Architecture
 
-```
-├── /frontend          # Vue 3 + Vite + Tailwind CSS application
-│   ├── src/
-│   │   ├── assets/    # Static assets (CSS, images)
-│   │   ├── components/# Reusable Vue components
-│   │   ├── router/    # Vue Router configuration
-│   │   ├── views/     # Page components
-│   │   └── main.ts    # Application entry point
-│   ├── index.html
-│   └── package.json
-├── /backend           # Node.js + Express + TypeScript API
-│   ├── src/
-│   │   └── index.ts   # Main server file
-│   └── package.json
-├── /shared            # Shared DTOs and types (Zod schemas)
-│   ├── src/
-│   │   ├── user.ts    # User-related DTOs
-│   │   ├── coaching-session.ts  # Coaching session DTOs
-│   │   └── goal.ts    # Goal-related DTOs
-│   └── package.json
-├── .eslintrc.cjs     # ESLint configuration
-├── .prettierrc.json  # Prettier configuration
-├── tsconfig.json     # Root TypeScript configuration
-├── pnpm-workspace.yaml  # pnpm workspace definition
-└── package.json      # Root package.json with scripts
-```
+- `backend/`: Go API and worker, clean domain/application/adapter boundaries, workflow state machines, Auth0 JWT validation, model gateway, learning policies, RAG, interviews, and PostgreSQL migrations.
+- `frontend/`: Vue 3, Pinia, and Vite learner experience for today’s itinerary, lessons, quizzes, progress, documents, interviews, preferences, and notifications.
+- `api/`: OpenAPI 3.1 REST contract and AsyncAPI streaming contract.
+- `infrastructure/`: local Compose services, AWS Terraform foundation, and Kubernetes/Kustomize workloads.
+- `docs/`: architectural decisions, deployment guidance, and operational runbooks.
+
+The runnable development profile uses a tenant-scoped in-memory adapter so contributors can exercise the complete API without cloud credentials. The PostgreSQL/pgvector schema and RLS policies define the production persistence contract; a durable PostgreSQL/queue adapter remains a production integration gate and should not be confused with the in-memory profile.
 
 ## Prerequisites
 
-- Node.js >= 18.0.0
-- pnpm >= 8.0.0
+- Node.js 18 or newer and pnpm 8 or newer
+- Go 1.22 or newer
+- Docker for local infrastructure
 
-## Installation
+## Quick start
 
 ```bash
-# Install pnpm if not already installed
-npm install -g pnpm
-
-# Install dependencies for all packages
 pnpm install
+make infra-up
+make dev
 ```
 
-## Development
+The frontend runs on `http://localhost:5173` and proxies `/api` to the Go API on `http://localhost:8080`.
 
-### Run all services concurrently
+For local authentication, explicitly configure the API for development and send `Authorization: Bearer dev:<subject>`. Production mode fails closed unless Auth0 issuer and audience settings are present.
 
 ```bash
-npm run dev
+cd backend
+APP_ENV=development go run ./cmd/api
 ```
 
-This will start:
-- Frontend on http://localhost:5173
-- Backend on http://localhost:3001
-
-### Run individual services
+Enable frontend demonstration data only when intentionally working without an API:
 
 ```bash
-# Frontend only
-pnpm --filter frontend dev
-
-# Backend only
-pnpm --filter backend dev
+VITE_DEMO_MODE=true pnpm --filter frontend dev
 ```
 
-## Build
+## Quality gates
 
 ```bash
-npm run build
+make build
+make test
+make lint
+docker compose config --quiet
+kubectl kustomize infrastructure/k8s/base >/dev/null
 ```
 
-This will build all packages in the monorepo.
+Backend-only verification:
 
-## Scripts Reference
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start both frontend and backend concurrently |
-| `npm run dev:frontend` | Start only the frontend |
-| `npm run dev:backend` | Start only the backend |
-| `npm run build` | Build all packages |
-| `npm run lint` | Run ESLint with auto-fix |
-| `npm run format` | Format code with Prettier |
+```bash
+cd backend
+go test ./...
+go vet ./...
+```
 
 ## Configuration
 
-### Frontend (Vue 3 + Vite + Tailwind CSS)
+Copy `.env.example` and set only non-secret local values. Production secrets belong in AWS Secrets Manager or a Kubernetes Secret populated by the deployment system. Important settings include:
 
-- **Port**: 5173
-- **API URL**: Configured via `VITE_API_URL` environment variable
-- **Styling**: Tailwind CSS with PostCSS and Autoprefixer
+- `APP_ENV`, `AUTH0_ISSUER`, and `AUTH0_AUDIENCE`
+- `LLM_BASE_URL` and task-specific `LLM_*_MODEL` aliases
+- `DATABASE_URL`, `REDIS_URL`, queue names, object bucket, and AWS region
+- `VITE_API_URL` and the opt-in `VITE_DEMO_MODE`
 
-### Backend (Express + TypeScript)
+See [architecture](docs/architecture.md), [deployment runbook](docs/runbooks/deployment.md), and the contracts in [`api/`](api/) for details.
 
-- **Port**: 3001 (configurable via `PORT` env variable)
-- **Entry Point**: `src/index.ts`
-- **Features**: CORS enabled, JSON body parsing
+## Current delivery boundary
 
-### Shared DTOs
-
-- Uses Zod for schema validation
-- Exports types and interfaces for both frontend and backend consumption
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Backend server port | 3001 |
-| `NODE_ENV` | Environment mode | development |
-| `VITE_API_URL` | Frontend API endpoint | http://localhost:3001/api |
-
-## Code Style
-
-This project enforces consistent code style using ESLint and Prettier:
-
-- **ESLint**: TypeScript recommended rules with Vue support
-- **Prettier**: 2-space indentation, single quotes, trailing commas
-
-All commits should pass linting before pushing.
+The repository now supplies the product-shaped learning loop, contracts, UI, policies, security boundaries, and infrastructure foundation. Before a production launch, complete and load-test the PostgreSQL/outbox/SQS/object-storage adapters, isolated binary document extraction and malware scanning, provider failover, notification delivery, and deployment-specific IAM/ingress wiring described in the runbooks.

@@ -4,6 +4,9 @@ node_modules/
 # Build outputs
 dist/
 build/
+bin/
+coverage.out
+*.test
 
 # Environment variables
 .env
@@ -30,4 +33,13 @@ coverage/
 
 # pnpm
 .pnp.*
-pnpm-lock.yaml
+.pnpm-store/
+
+# Local infrastructure data
+.local-data/
+infrastructure/terraform/**/*.tfstate
+infrastructure/terraform/**/*.tfstate.*
+infrastructure/terraform/**/.terraform/
+
+# Go workspace files
+go.work.sum
