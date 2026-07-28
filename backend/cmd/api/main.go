@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -39,7 +40,8 @@ func main() {
 		os.Exit(1)
 	}
 	verifier := identity.New(env("AUTH0_ISSUER", "https://local.invalid/"), env("AUTH0_AUDIENCE", "ai-learning-coach"), authMode)
-	server := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: api.New(coach, store, verifier, log), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second}
+	handler := api.WithCORS(api.New(coach, store, verifier, log), strings.Split(env("CORS_ALLOWED_ORIGINS", "http://localhost:5173"), ","))
+	server := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second}
 	log.Info("api listening", "address", server.Addr, "auth_mode", verifier.Mode)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("api stopped", "error", err)

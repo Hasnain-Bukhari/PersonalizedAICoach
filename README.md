@@ -28,8 +28,8 @@ The runnable development profile uses a tenant-scoped in-memory adapter so contr
 ## Prerequisites
 
 - Node.js 18 or newer and pnpm 8 or newer
-- Go 1.22 or newer
-- Docker for local infrastructure
+- Go 1.22 or newer, or Docker as the API development fallback
+- Docker for local infrastructure and containerized API fallback
 
 ## Quick start
 
@@ -40,8 +40,11 @@ make dev
 ```
 
 The frontend runs on `http://localhost:5173` and proxies `/api` to the Go API on `http://localhost:8080`.
+Port `3001` belongs to the retired Node prototype and is not used by the current application. If it returns `Hello World`, stop that process and start the Go API with `make dev` or the command below.
+When Go is unavailable locally, `npm run dev` automatically builds and starts the `api` Docker Compose service. Its output remains visible under the `[api]` prefix. You can also inspect it separately with `docker compose logs -f api`.
 
 For local authentication, explicitly configure the API for development and send `Authorization: Bearer dev:<subject>`. Production mode fails closed unless Auth0 issuer and audience settings are present.
+The example frontend environment supplies `VITE_DEV_TOKEN=dev:learner` for local development only; real Auth0 access tokens should be stored at runtime and must never be compiled into a `VITE_` variable.
 
 ```bash
 cd backend

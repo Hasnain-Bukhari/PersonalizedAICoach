@@ -4,12 +4,16 @@ import type { ActivityDay, AnalyticsOverview, ApiDailySession, ApiDocument, Dail
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1'
 export const demoMode = import.meta.env.VITE_DEMO_MODE === 'true'
 
+function accessToken(): string | null {
+  return localStorage.getItem('coach_token') || import.meta.env.VITE_DEV_TOKEN || null
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string) { super(message); this.name = 'ApiError' }
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('coach_token')
+  const token = accessToken()
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: { ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options?.headers },
@@ -65,11 +69,11 @@ export const api = {
   interviewSocket: (id: string, onMessage: (message: InterviewMessage) => void, onError: (message: string) => void) => {
     if (demoMode) return undefined
     const base = new URL(API_URL, window.location.href); const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'; const url = `${protocol}//${base.host}${base.pathname}/interview/stream?interview_id=${encodeURIComponent(id)}`
-    const token = localStorage.getItem('coach_token'); const protocols = ['coach.v1']; if (token) protocols.push(`auth.${btoa(token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`)
+    const token = accessToken(); const protocols = ['coach.v1']; if (token) protocols.push(`auth.${btoa(token).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`)
     const socket = new WebSocket(url, protocols); socket.onmessage = event => { try { const frame = JSON.parse(event.data) as InterviewMessage | { payload: InterviewMessage }; onMessage('payload' in frame ? frame.payload : frame) } catch { onError('The interviewer sent an unreadable response.') } }; socket.onerror = () => onError('The live interview connection was interrupted. Reconnect and continue when ready.'); return socket
   },
   events: (onEvent: (event: StreamEvent) => void, onError: () => void) => {
-    const controller = new AbortController(); const token = localStorage.getItem('coach_token')
+    const controller = new AbortController(); const token = accessToken()
     void fetch(`${API_URL}/events/stream`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal }).then(async response => {
       if (!response.ok || !response.body) throw new ApiError(response.status, 'Unable to connect to learning events.')
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''

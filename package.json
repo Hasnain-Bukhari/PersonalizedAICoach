@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -n web,api \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "cd backend && go run ./cmd/api",
+    "dev:backend": "./scripts/dev-backend.sh",
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "npm --prefix frontend run build",
     "build:backend": "cd backend && go build ./...",

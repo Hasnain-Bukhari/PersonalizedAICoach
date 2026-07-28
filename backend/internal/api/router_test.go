@@ -30,6 +30,25 @@ func TestHealthAndAuthentication(t *testing.T) {
 		t.Fatalf("unauthorized=%d", w.Code)
 	}
 }
+func TestCORSPreflight(t *testing.T) {
+	h := WithCORS(handler(), []string{"http://localhost:5173"})
+	r := httptest.NewRequest(http.MethodOptions, "/api/v1/sessions/daily", nil)
+	r.Header.Set("Origin", "http://localhost:5173")
+	r.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNoContent || w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+		t.Fatalf("preflight status=%d origin=%q", w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	r = httptest.NewRequest(http.MethodOptions, "/api/v1/sessions/daily", nil)
+	r.Header.Set("Origin", "https://malicious.example")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("disallowed preflight status=%d origin=%q", w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
 func TestDailySessionAPI(t *testing.T) {
 	h := handler()
 	r := httptest.NewRequest("GET", "/api/v1/sessions/daily?date=2026-07-26", nil)

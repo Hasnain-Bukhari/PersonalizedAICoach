@@ -63,6 +63,41 @@ func New(c *application.Coach, s ports.Store, v *identity.Verifier, l *slog.Logg
 	mux.HandleFunc("GET /api/v1/events/stream", a.events)
 	return requestID(recoverer(l, a.auth(mux)))
 }
+
+// WithCORS permits configured browser origins while keeping authorization on
+// every application request. It is intentionally outside the auth middleware
+// so browsers can complete an OPTIONS preflight without a bearer token.
+func WithCORS(next http.Handler, origins []string) http.Handler {
+	allowed := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if _, ok := allowed[origin]; origin != "" && ok {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, Last-Event-ID, X-Request-ID")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Add("Vary", "Origin")
+		}
+		if r.Method == http.MethodOptions {
+			if origin == "" {
+				problem(w, http.StatusBadRequest, "invalid_cors_request", "Origin header required")
+				return
+			}
+			if _, ok := allowed[origin]; !ok {
+				problem(w, http.StatusForbidden, "origin_not_allowed", "Origin is not allowed")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 func (a *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/api/v1/healthz" || r.URL.Path == "/api/v1/readyz" {
