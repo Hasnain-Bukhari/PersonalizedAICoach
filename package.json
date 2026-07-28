@@ -5,19 +5,25 @@
   "type": "module",
   "packageManager": "pnpm@11.17.0",
   "scripts": {
-    "dev": "concurrently -n web,api \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "dev:frontend": "npm --prefix frontend run dev",
+    "dev": "concurrently -n web,api \"pnpm dev:frontend\" \"pnpm dev:backend\"",
+    "dev:frontend": "pnpm --filter frontend dev",
     "dev:backend": "./scripts/dev-backend.sh",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "npm --prefix frontend run build",
+    "build": "pnpm build:frontend && pnpm build:backend",
+    "build:frontend": "pnpm --filter frontend build",
     "build:backend": "cd backend && go build ./...",
-    "test": "npm run test:frontend && npm run test:backend",
-    "test:frontend": "npm --prefix frontend test",
+    "test": "pnpm test:frontend && pnpm test:backend",
+    "test:frontend": "pnpm --filter frontend test",
     "test:backend": "cd backend && go test ./...",
-    "lint": "npm --prefix frontend run lint && cd backend && go vet ./...",
-    "format": "prettier --write \"frontend/**/*.{ts,vue,json,css,md}\" \"api/**/*.{yaml,yml}\" \"docs/**/*.md\""
+    "lint": "pnpm --filter frontend lint && cd backend && go vet ./...",
+    "format": "prettier --write \"frontend/**/*.{ts,vue,json,css,md}\" \"api/**/*.{yaml,yml}\" \"docs/**/*.md\"",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report artifacts/reports/playwright",
+    "verify": "./scripts/verify.sh",
+    "verify:changes": "./scripts/verify-changes.sh"
   },
   "devDependencies": {
+    "@playwright/test": "1.54.1",
     "concurrently": "^8.2.2",
     "prettier": "^3.1.1"
   },

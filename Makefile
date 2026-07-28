@@ -1,19 +1,19 @@
 .PHONY: dev build test lint frontend backend infra-up infra-down
 
 dev:
-	npm run dev
+	pnpm dev
 
 build:
-	npm run build
+	pnpm build
 
 test:
-	npm test
+	pnpm test
 
 lint:
-	npm run lint
+	pnpm lint
 
 frontend:
-	npm --prefix frontend run dev
+	pnpm --filter frontend dev
 
 backend:
 	cd backend && go run ./cmd/api

@@ -1,0 +1,42 @@
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[agents]
+max_threads = 4
+
+[agents.explorer]
+description = """
+Read-only codebase investigator. Use for locating affected files,
+understanding architecture, tracing data flow, and identifying tests.
+Never edit files.
+"""
+config_file = "agents/explorer.toml"
+
+[agents.implementer]
+description = """
+Implementation agent. Use only after the implementation plan is approved.
+Makes bounded code changes and adds appropriate tests.
+"""
+config_file = "agents/implementer.toml"
+
+[agents.qa]
+description = """
+Independent QA agent. Runs the application, automated tests, Playwright,
+browser console inspection, network inspection, and log analysis.
+Does not declare success without evidence.
+"""
+config_file = "agents/qa.toml"
+
+[agents.reviewer]
+description = """
+Read-only final reviewer. Reviews the finished diff for correctness,
+security risks, regressions, maintainability, and missing tests.
+"""
+config_file = "agents/reviewer.toml"
+
+[agents.failure-investigator]
+description = """
+Focused read-only investigator for one failing command, test, trace, or log set.
+Returns a compact root-cause analysis and smallest repair recommendation.
+"""
+config_file = "agents/failure-investigator.toml"

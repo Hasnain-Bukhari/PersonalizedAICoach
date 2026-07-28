@@ -1,0 +1,20 @@
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+
+developer_instructions = """
+Review the final working-tree diff independently.
+
+Check:
+- requirement coverage
+- incorrect assumptions
+- regressions
+- security concerns
+- error handling
+- architecture consistency
+- test quality
+- missing edge cases
+- accidental unrelated changes
+
+Do not edit files.
+Return prioritized findings with file references.
+"""

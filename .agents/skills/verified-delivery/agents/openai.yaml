@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verified Delivery"
+  short_description: "Plan, test, repair, and verify repository changes"
+  default_prompt: "Use $verified-delivery to deliver this change with approval-gated planning and full verification."
