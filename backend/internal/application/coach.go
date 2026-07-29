@@ -11,6 +11,7 @@ import (
 	"github.com/personalized-ai-coach/backend/internal/domain"
 	"github.com/personalized-ai-coach/backend/internal/ports"
 	"io"
+	"math"
 	"strings"
 	"time"
 )
@@ -71,7 +72,10 @@ func (c *Coach) Daily(ctx context.Context, user, date string) (domain.DailySessi
 			return domain.DailySession{}, false, err
 		}
 	}
-	nodes, _ := c.Store.KnowledgeGraph(ctx, user)
+	nodes, err := c.Store.KnowledgeGraph(ctx, user)
+	if err != nil {
+		return domain.DailySession{}, false, err
+	}
 	topic := "System Design.Fundamentals"
 	for _, n := range nodes {
 		if !n.NextRevisionDue.After(now) || n.Mastery < 60 {
@@ -79,26 +83,48 @@ func (c *Coach) Daily(ctx context.Context, user, date string) (domain.DailySessi
 			break
 		}
 	}
-	chunks, _ := c.Store.SearchChunks(ctx, user, topic, 4)
-	citations := make([]domain.Citation, 0, len(chunks))
-	for _, x := range chunks {
-		citations = append(citations, domain.Citation{DocumentID: x.DocumentID, ChunkID: x.ID, Locator: x.Locator, Quote: truncate(x.Text, 180)})
-	}
-	lesson, q := c.generateLearningMaterial(ctx, topic, citations)
-	if err := c.Store.SaveQuiz(ctx, user, q); err != nil {
+	chunks, err := c.Store.SearchChunks(ctx, user, topic, 4)
+	if err != nil {
 		return domain.DailySession{}, false, err
 	}
+	citations := make([]domain.Citation, 0, len(chunks))
+	documentTitles := make(map[string]string, len(chunks))
+	for _, x := range chunks {
+		title, known := documentTitles[x.DocumentID]
+		if !known {
+			document, found, documentErr := c.Store.Document(ctx, user, x.DocumentID)
+			if documentErr != nil {
+				return domain.DailySession{}, false, documentErr
+			}
+			if !found {
+				return domain.DailySession{}, false, errors.New("citation document not found")
+			}
+			title = strings.TrimSpace(document.Name)
+			if title == "" {
+				title = "Untitled document"
+			}
+			documentTitles[x.DocumentID] = title
+		}
+		citations = append(citations, domain.Citation{DocumentID: x.DocumentID, ChunkID: x.ID, Title: title, Locator: x.Locator, Quote: truncate(x.Text, 180)})
+	}
+	lesson, q := c.generateLearningMaterial(ctx, topic, citations)
 	if err := c.transition(ctx, &w, "validation"); err != nil {
 		return domain.DailySession{}, false, err
 	}
 	s := domain.DailySession{ID: id("ses_"), UserID: user, Date: date, Status: "published", WorkflowID: w.ID, Objectives: lesson.Objectives, EstimatedMinutes: sessionMinutes, Lesson: lesson, Quiz: q, Reflection: "What assumption changed during this session?", Homework: "Sketch the design and annotate its highest-risk boundary.", Preview: "Tomorrow: revisit weak answers using a different scenario.", CreatedAt: now, UpdatedAt: now}
-	if err := c.Store.SaveDailySession(ctx, s); err != nil {
+	saved, created, err := c.Store.CreateDailySession(ctx, s)
+	if err != nil {
 		return s, false, err
+	}
+	if !created {
+		return saved, false, nil
 	}
 	if err := c.transition(ctx, &w, "published"); err != nil {
 		return s, false, err
 	}
-	_ = c.transition(ctx, &w, "notified")
+	if err := c.transition(ctx, &w, "notified"); err != nil {
+		return s, false, err
+	}
 	return s, true, nil
 }
 
@@ -133,21 +159,78 @@ func (c *Coach) generateLearningMaterial(ctx context.Context, topic string, cita
 		return fallbackLesson, fallbackQuiz
 	}
 	var material generatedMaterial
-	if json.Unmarshal([]byte(response.Content), &material) != nil || len(material.Objectives) == 0 || material.Simple == "" || len(material.Questions) != 3 {
+	if json.Unmarshal([]byte(response.Content), &material) != nil || !validGeneratedMaterial(material) {
 		return fallbackLesson, fallbackQuiz
 	}
 	lesson := domain.Lesson{ID: id("lesson"), Topic: topic, Objectives: material.Objectives, Simple: material.Simple, RealWorld: material.RealWorld, Advanced: material.Advanced, Diagram: material.Diagram, BestPractices: material.BestPractices, Pitfalls: material.Pitfalls, CheatSheet: material.CheatSheet, Confidence: material.Confidence, Citations: citations}
 	quiz := domain.Quiz{ID: id("quiz")}
 	for _, item := range material.Questions {
-		if item.Prompt == "" || item.Answer == "" || item.Explanation == "" {
-			return fallbackLesson, fallbackQuiz
-		}
 		quiz.Questions = append(quiz.Questions, domain.Question{ID: id("question"), Type: item.Type, Prompt: item.Prompt, Options: item.Options, CorrectAnswer: item.Answer, Explanation: item.Explanation, Topic: topic})
 	}
 	return lesson, quiz
 }
 
+func validGeneratedMaterial(material generatedMaterial) bool {
+	if len(material.Objectives) == 0 || !finiteUnit(material.Confidence) {
+		return false
+	}
+	for _, objective := range material.Objectives {
+		if strings.TrimSpace(objective) == "" {
+			return false
+		}
+	}
+	for _, section := range []string{material.Simple, material.RealWorld, material.Advanced, material.Diagram, material.BestPractices, material.Pitfalls, material.CheatSheet} {
+		if strings.TrimSpace(section) == "" {
+			return false
+		}
+	}
+	if len(material.Questions) != 3 {
+		return false
+	}
+	types := map[string]bool{}
+	for _, question := range material.Questions {
+		questionType := strings.TrimSpace(question.Type)
+		if questionType != "multiple_choice" && questionType != "scenario" && questionType != "true_false" {
+			return false
+		}
+		if types[questionType] || strings.TrimSpace(question.Prompt) == "" || strings.TrimSpace(question.Answer) == "" || strings.TrimSpace(question.Explanation) == "" {
+			return false
+		}
+		types[questionType] = true
+		if questionType == "scenario" {
+			if len(question.Options) != 0 {
+				return false
+			}
+			continue
+		}
+		if len(question.Options) < 2 || !containsFold(question.Options, question.Answer) {
+			return false
+		}
+		if questionType == "true_false" && (!containsFold(question.Options, "true") || !containsFold(question.Options, "false")) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsFold(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func finiteUnit(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
+}
+
 func (c *Coach) SubmitQuiz(ctx context.Context, user, quizID, key string, answers []domain.Answer) (domain.QuizResult, error) {
+	if strings.TrimSpace(key) == "" {
+		return domain.QuizResult{}, errors.New("Idempotency-Key is required")
+	}
 	q, ok, err := c.Store.GetQuiz(ctx, user, quizID)
 	if err != nil {
 		return domain.QuizResult{}, err
@@ -155,15 +238,39 @@ func (c *Coach) SubmitQuiz(ctx context.Context, user, quizID, key string, answer
 	if !ok {
 		return domain.QuizResult{}, errors.New("quiz not found")
 	}
-	if key == "" {
-		return domain.QuizResult{}, errors.New("Idempotency-Key is required")
+	if len(q.Questions) == 0 {
+		return domain.QuizResult{}, errors.New("quiz contains no questions")
 	}
-	byID := map[string]domain.Answer{}
+	if len(answers) == 0 {
+		return domain.QuizResult{}, errors.New("at least one answer is required")
+	}
+	questionsByID := make(map[string]domain.Question, len(q.Questions))
+	for _, question := range q.Questions {
+		questionsByID[question.ID] = question
+	}
+	byID := make(map[string]domain.Answer, len(answers))
 	for _, a := range answers {
+		if _, known := questionsByID[a.QuestionID]; !known {
+			return domain.QuizResult{}, errors.New("answer references an unknown question")
+		}
+		if _, duplicate := byID[a.QuestionID]; duplicate {
+			return domain.QuizResult{}, errors.New("each question may be answered only once")
+		}
+		a.Value = strings.TrimSpace(a.Value)
+		if a.Value == "" {
+			return domain.QuizResult{}, errors.New("answer value is required")
+		}
+		if !finiteUnit(a.Confidence) {
+			return domain.QuizResult{}, errors.New("answer confidence must be between 0 and 1")
+		}
 		byID[a.QuestionID] = a
+	}
+	if len(byID) != len(q.Questions) {
+		return domain.QuizResult{}, errors.New("every quiz question must be answered")
 	}
 	now := c.Now().UTC()
 	r := domain.QuizResult{AttemptID: id("att_")}
+	observations := make([]ports.KnowledgeObservation, 0, len(q.Questions))
 	correct := 0
 	for _, question := range q.Questions {
 		a := byID[question.ID]
@@ -171,35 +278,30 @@ func (c *Coach) SubmitQuiz(ctx context.Context, user, quizID, key string, answer
 		if isCorrect {
 			correct++
 		}
-		quality := domain.QualityFromAnswer(isCorrect, a.Confidence, strings.TrimSpace(a.Value) == "")
-		node, exists, _ := c.Store.KnowledgeNode(ctx, user, question.Topic)
-		if !exists {
-			node = domain.KnowledgeNode{ID: id("kn_"), UserID: user, Domain: strings.Split(question.Topic, ".")[0], TopicPath: question.Topic, EaseFactor: 2.5}
-		}
-		before := node.Mastery
-		node.Mastery = domain.UpdateMastery(node.Mastery, float64(quality)*20, node.Attempts)
-		node.Confidence = a.Confidence * 100
-		node = domain.ScheduleSM2(node, quality, now)
-		_ = c.Store.SaveKnowledgeNode(ctx, node)
+		quality := domain.QualityFromAnswer(isCorrect, a.Confidence, false)
+		domainName := strings.Split(question.Topic, ".")[0]
+		observations = append(observations, ports.KnowledgeObservation{NodeID: id("kn_"), Topic: question.Topic, Domain: domainName, Quality: quality, Confidence: a.Confidence, At: now})
 		mis := []string{}
 		if !isCorrect {
 			mis = []string{"Review the underlying trade-off and validate the assumption explicitly."}
 		}
 		r.Results = append(r.Results, domain.AnswerResult{QuestionID: question.ID, Correct: isCorrect, Explanation: question.Explanation, Misconceptions: mis})
-		r.MasteryChanges = append(r.MasteryChanges, domain.MasteryChange{Topic: question.Topic, Before: before, After: node.Mastery, NextRevisionDue: node.NextRevisionDue})
 	}
 	r.Score = float64(correct) / float64(len(q.Questions)) * 100
 	r.XPAwarded = 10 + correct*5
 	idempotencyScope := quizID + ":" + key
-	saved, created, err := c.Store.SaveQuizResult(ctx, user, idempotencyScope, r)
-	if err != nil {
-		return r, err
+	fingerprint := quizFingerprint(q, byID)
+	saved, _, err := c.Store.CommitQuizAttempt(ctx, user, idempotencyScope, fingerprint, r, observations)
+	return saved, err
+}
+
+func quizFingerprint(quiz domain.Quiz, answers map[string]domain.Answer) string {
+	hash := sha256.New()
+	for _, question := range quiz.Questions {
+		answer := answers[question.ID]
+		_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%.6f\x00", question.ID, strings.TrimSpace(answer.Value), answer.Confidence)
 	}
-	if !created {
-		return saved, nil
-	}
-	_, _, err = c.Store.AddXP(ctx, user, "quiz:"+idempotencyScope, r.XPAwarded)
-	return r, err
+	return hex.EncodeToString(hash.Sum(nil))
 }
 func answerCorrect(q domain.Question, a string) bool {
 	a = strings.TrimSpace(strings.ToLower(a))
@@ -272,29 +374,79 @@ func (c *Coach) CreateInterview(ctx context.Context, user, prompt string) (domai
 	x.Sequence = 1
 	return x, c.Store.SaveInterview(ctx, x)
 }
-func (c *Coach) InterviewReply(ctx context.Context, user, id, content string) (domain.Interview, error) {
-	x, ok, e := c.Store.Interview(ctx, user, id)
-	if e != nil {
-		return x, e
+func (c *Coach) InterviewReply(ctx context.Context, user, interviewID, content string) (domain.Interview, error) {
+	interview, _, err := c.interviewReplyEvent(ctx, user, interviewID, id("evt_"), 0, content)
+	return interview, err
+}
+
+func (c *Coach) InterviewReplyEvent(ctx context.Context, user, interviewID, eventID string, clientSequence int64, content string) (domain.Interview, bool, error) {
+	if strings.TrimSpace(eventID) == "" {
+		return domain.Interview{}, false, errors.New("event_id is required")
 	}
-	if !ok {
-		return x, errors.New("interview not found")
+	if clientSequence < 1 {
+		return domain.Interview{}, false, errors.New("client sequence must be positive")
 	}
-	if x.State == "scored" {
-		return x, errors.New("interview already scored")
+	return c.interviewReplyEvent(ctx, user, interviewID, eventID, clientSequence, content)
+}
+
+func (c *Coach) interviewReplyEvent(ctx context.Context, user, interviewID, eventID string, clientSequence int64, content string) (domain.Interview, bool, error) {
+	content = strings.TrimSpace(content)
+	automaticSequence := clientSequence == 0
+	for attempt := 0; attempt < 16; attempt++ {
+		x, ok, err := c.Store.Interview(ctx, user, interviewID)
+		if err != nil {
+			return x, false, err
+		}
+		if !ok {
+			return x, false, errors.New("interview not found")
+		}
+		if receipt, processed := x.ProcessedEvents[eventID]; processed {
+			if (!automaticSequence && receipt.ClientSequence != clientSequence) || receipt.Fingerprint != interviewEventFingerprint(receipt.ClientSequence, content) {
+				return x, false, ports.ErrIdempotencyConflict
+			}
+			return x, false, nil
+		}
+		if !automaticSequence && clientSequence <= x.LastClientSequence {
+			return x, false, ports.ErrInterviewSequenceConflict
+		}
+		if x.State == "scored" {
+			return x, false, errors.New("interview already scored")
+		}
+		nextClientSequence := clientSequence
+		if automaticSequence {
+			nextClientSequence = x.LastClientSequence + 1
+		}
+		expectedSequence := x.Sequence
+		x.LastClientSequence = nextClientSequence
+		if x.ProcessedEvents == nil {
+			x.ProcessedEvents = make(map[string]domain.InterviewEventReceipt)
+		}
+		x.ProcessedEvents[eventID] = domain.InterviewEventReceipt{ClientSequence: nextClientSequence, Fingerprint: interviewEventFingerprint(nextClientSequence, content)}
+		x.Sequence++
+		x.Messages = append(x.Messages, domain.InterviewMessage{Sequence: x.Sequence, Role: "candidate", Content: content, At: c.Now().UTC()})
+		next := interviewNext[x.State]
+		x.State = next
+		x.Sequence++
+		reply := interviewPrompt(next)
+		if next == "scored" {
+			x.Scorecard = score(x.Messages)
+			reply = "The interview is complete. Your scorecard is ready."
+		}
+		x.Messages = append(x.Messages, domain.InterviewMessage{Sequence: x.Sequence, Role: "interviewer", Content: reply, At: c.Now().UTC()})
+		saved, updated, err := c.Store.CompareAndSwapInterview(ctx, user, interviewID, expectedSequence, x)
+		if err != nil {
+			return saved, false, err
+		}
+		if updated {
+			return saved, true, nil
+		}
 	}
-	x.Sequence++
-	x.Messages = append(x.Messages, domain.InterviewMessage{Sequence: x.Sequence, Role: "candidate", Content: content, At: c.Now().UTC()})
-	next := interviewNext[x.State]
-	x.State = next
-	x.Sequence++
-	reply := interviewPrompt(next)
-	if next == "scored" {
-		x.Scorecard = score(x.Messages)
-		reply = "The interview is complete. Your scorecard is ready."
-	}
-	x.Messages = append(x.Messages, domain.InterviewMessage{Sequence: x.Sequence, Role: "interviewer", Content: reply, At: c.Now().UTC()})
-	return x, c.Store.SaveInterview(ctx, x)
+	return domain.Interview{}, false, errors.New("interview update conflicted too many times")
+}
+
+func interviewEventFingerprint(clientSequence int64, content string) string {
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", clientSequence, content)))
+	return hex.EncodeToString(hash[:])
 }
 func interviewPrompt(s string) string {
 	m := map[string]string{"requirements": "What functional and non-functional requirements will you prioritize?", "estimation": "Estimate traffic, storage, and peak-to-average load.", "high_level_design": "Describe the major components, APIs, and data flow.", "deep_dives": "Choose the highest-risk component and explain scaling, failure, and consistency trade-offs.", "wrap_up": "Summarize security, reliability, cost, observability, and future evolution."}

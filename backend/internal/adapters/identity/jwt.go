@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"strings"
@@ -29,12 +30,20 @@ type Verifier struct {
 	Issuer, Audience, Mode string
 	Client                 *http.Client
 	mu                     sync.RWMutex
+	refreshMu              sync.Mutex
 	keys                   map[string]*rsa.PublicKey
 	fetched                time.Time
+	lastForcedRefresh      time.Time
+	now                    func() time.Time
 }
 
+const (
+	maxJWKSResponseBytes = 1 << 20
+	forcedRefreshThrottle = 30 * time.Second
+)
+
 func New(issuer, audience, mode string) *Verifier {
-	return &Verifier{Issuer: strings.TrimRight(issuer, "/") + "/", Audience: audience, Mode: mode, Client: &http.Client{Timeout: 5 * time.Second}, keys: map[string]*rsa.PublicKey{}}
+	return &Verifier{Issuer: strings.TrimRight(issuer, "/") + "/", Audience: audience, Mode: mode, Client: &http.Client{Timeout: 5 * time.Second}, keys: map[string]*rsa.PublicKey{}, now: time.Now}
 }
 func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	if v.Mode == "dev" && strings.HasPrefix(token, "dev:") {
@@ -106,12 +115,13 @@ func audienceContains(v any, want string) bool {
 func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	v.mu.RLock()
 	k := v.keys[kid]
-	fresh := time.Since(v.fetched) < time.Hour
+	fresh := v.now().Sub(v.fetched) < time.Hour
+	observedFetch := v.fetched
 	v.mu.RUnlock()
 	if k != nil && fresh {
 		return k, nil
 	}
-	if err := v.refresh(ctx); err != nil {
+	if err := v.refresh(ctx, observedFetch, k == nil && !observedFetch.IsZero()); err != nil {
 		return nil, err
 	}
 	v.mu.RLock()
@@ -122,39 +132,85 @@ func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) 
 	}
 	return k, nil
 }
-func (v *Verifier) refresh(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, v.Issuer+".well-known/jwks.json", nil)
+func (v *Verifier) refresh(ctx context.Context, observedFetch time.Time, force bool) error {
+	v.refreshMu.Lock()
+	defer v.refreshMu.Unlock()
+
+	// Another request may have refreshed while this request waited for the
+	// single refresh lock. Avoid stampeding the identity provider.
+	v.mu.RLock()
+	fresh := v.now().Sub(v.fetched) < time.Hour
+	refreshedByAnotherRequest := !v.fetched.Equal(observedFetch)
+	lastForcedRefresh := v.lastForcedRefresh
+	v.mu.RUnlock()
+	if refreshedByAnotherRequest || (fresh && !force) {
+		return nil
+	}
+	if force {
+		now := v.now()
+		if !lastForcedRefresh.IsZero() && now.Sub(lastForcedRefresh) < forcedRefreshThrottle {
+			return nil
+		}
+		// Throttle forced refreshes even when the provider is unavailable so
+		// attacker-controlled random key IDs cannot amplify outbound traffic.
+		v.mu.Lock()
+		v.lastForcedRefresh = now
+		v.mu.Unlock()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.Issuer+".well-known/jwks.json", nil)
+	if err != nil {
+		return errors.New("invalid identity provider URL")
+	}
 	resp, e := v.Client.Do(req)
 	if e != nil {
 		return e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("JWKS fetch: %s", resp.Status)
+		return fmt.Errorf("JWKS fetch failed with status %d", resp.StatusCode)
 	}
 	var set struct {
 		Keys []struct{ Kty, Kid, N, E string }
 	}
-	if e = json.NewDecoder(resp.Body).Decode(&set); e != nil {
-		return e
+	limited := io.LimitReader(resp.Body, maxJWKSResponseBytes+1)
+	body, e := io.ReadAll(limited)
+	if e != nil {
+		return errors.New("unable to read JWKS response")
+	}
+	if len(body) > maxJWKSResponseBytes {
+		return errors.New("JWKS response is too large")
+	}
+	if e = json.Unmarshal(body, &set); e != nil {
+		return errors.New("invalid JWKS response")
 	}
 	keys := map[string]*rsa.PublicKey{}
 	for _, j := range set.Keys {
 		if j.Kty != "RSA" {
 			continue
 		}
+		if j.Kid == "" {
+			continue
+		}
 		nb, e1 := base64.RawURLEncoding.DecodeString(j.N)
 		eb, e2 := base64.RawURLEncoding.DecodeString(j.E)
-		if e1 != nil || e2 != nil || len(eb) > 4 {
+		if e1 != nil || e2 != nil || len(nb) < 256 || len(eb) == 0 || len(eb) > 4 {
 			continue
 		}
 		var padded [4]byte
 		copy(padded[4-len(eb):], eb)
-		keys[j.Kid] = &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: int(binary.BigEndian.Uint32(padded[:]))}
+		exponent := int(binary.BigEndian.Uint32(padded[:]))
+		if exponent < 3 || exponent%2 == 0 {
+			continue
+		}
+		keys[j.Kid] = &rsa.PublicKey{N: new(big.Int).SetBytes(nb), E: exponent}
+	}
+	if len(keys) == 0 {
+		return errors.New("JWKS response contained no usable RSA keys")
 	}
 	v.mu.Lock()
 	v.keys = keys
-	v.fetched = time.Now()
+	v.fetched = v.now()
 	v.mu.Unlock()
 	return nil
 }

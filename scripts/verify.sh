@@ -6,6 +6,7 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_DIR="$ROOT/artifacts/verification/$STAMP"
 REPORT_DIR="$ROOT/artifacts/reports"
 RESULTS="$RUN_DIR/results.tsv"
+CACHE_DIR=${COACH_CACHE_DIR:-$RUN_DIR/cache}
 mkdir -p "$RUN_DIR/logs" "$REPORT_DIR"
 : >"$RESULTS"
 
@@ -66,16 +67,16 @@ backend_check() {
 }
 
 cleanup() {
-  if [ "${SERVICES_STARTED:-false}" = true ]; then
+  if [ "${SERVICE_START_ATTEMPTED:-false}" = true ]; then
     env COACH_RUNTIME_DIR="$RUN_DIR/runtime" "$ROOT/scripts/dev-stop.sh" >"$RUN_DIR/logs/service-cleanup.log" 2>&1 || true
   fi
 }
 trap cleanup EXIT HUP INT TERM
 
 if [ "${PNPM_OFFLINE:-false}" = true ]; then
-  run_check dependencies pnpm install --frozen-lockfile --offline --store-dir "$ROOT/.pnpm-store"
+  run_check dependencies pnpm install --frozen-lockfile --offline --store-dir "$ROOT/.pnpm-store" --config.confirmModulesPurge=false
 else
-  run_check dependencies pnpm install --frozen-lockfile
+  run_check dependencies pnpm install --frozen-lockfile --config.confirmModulesPurge=false
 fi
 run_check frontend-format pnpm exec prettier --check "frontend/**/*.{ts,vue,json,css,md}"
 run_check api-docs-format pnpm exec prettier --check "api/**/*.{yaml,yml}" "docs/**/*.md"
@@ -84,8 +85,8 @@ run_check frontend-lint pnpm --filter frontend lint
 run_check frontend-build pnpm --filter frontend build
 run_check frontend-tests pnpm --filter frontend test
 run_check compose-config docker compose -f "$ROOT/docker-compose.yml" config --quiet
-run_check openapi pnpm --config.ignore-scripts=true --package=@redocly/cli@1.34.2 dlx redocly lint "$ROOT/api/openapi.yaml"
-run_check asyncapi pnpm --config.ignore-scripts=true dlx @asyncapi/cli@3.4.0 validate "$ROOT/api/asyncapi.yaml"
+run_check openapi env XDG_CACHE_HOME="$CACHE_DIR" pnpm --config.ignore-scripts=true --package=@redocly/cli@1.34.2 dlx redocly lint "$ROOT/api/openapi.yaml"
+run_check asyncapi env XDG_CACHE_HOME="$CACHE_DIR" pnpm --config.ignore-scripts=true dlx @asyncapi/cli@3.4.0 validate "$ROOT/api/asyncapi.yaml"
 
 if command -v kubectl >/dev/null 2>&1; then
   run_check kustomize kubectl kustomize "$ROOT/infrastructure/k8s/base"
@@ -114,6 +115,7 @@ if [ "$runtime_available" = true ]; then
   run_check backend-tests backend_check go test ./...
   run_check backend-race-tests backend_check go test -race ./...
   run_check migration "$ROOT/scripts/verify-migration.sh"
+  SERVICE_START_ATTEMPTED=true
   run_check service-start env COACH_RUNTIME_DIR="$RUN_DIR/runtime" "$ROOT/scripts/dev-start.sh"
   if [ "$LAST_CODE" -eq 0 ]; then
     if [ -f "$RUN_DIR/runtime/api.pid" ] || [ -f "$RUN_DIR/runtime/frontend.pid" ] || [ -f "$RUN_DIR/runtime/api.compose-started" ]; then

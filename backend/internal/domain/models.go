@@ -159,14 +159,20 @@ type Chunk struct {
 }
 
 type Interview struct {
-	ID        string             `json:"id"`
-	UserID    string             `json:"-"`
-	Prompt    string             `json:"prompt"`
-	State     string             `json:"state"`
-	Sequence  int64              `json:"sequence"`
-	Messages  []InterviewMessage `json:"messages"`
-	Scorecard *Scorecard         `json:"scorecard,omitempty"`
-	CreatedAt time.Time          `json:"created_at"`
+	ID                 string                           `json:"id"`
+	UserID             string                           `json:"-"`
+	Prompt             string                           `json:"prompt"`
+	State              string                           `json:"state"`
+	Sequence           int64                            `json:"sequence"`
+	LastClientSequence int64                            `json:"-"`
+	ProcessedEvents    map[string]InterviewEventReceipt `json:"-"`
+	Messages           []InterviewMessage               `json:"messages"`
+	Scorecard          *Scorecard                       `json:"scorecard,omitempty"`
+	CreatedAt          time.Time                        `json:"created_at"`
+}
+type InterviewEventReceipt struct {
+	ClientSequence int64
+	Fingerprint    string
 }
 type InterviewMessage struct {
 	Sequence int64     `json:"sequence"`
