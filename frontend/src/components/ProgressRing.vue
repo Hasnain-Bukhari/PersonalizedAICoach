@@ -1,2 +1,16 @@
-<script setup lang="ts">import { computed } from 'vue'; const props = defineProps<{ value: number; label?: string }>(); const offset = computed(() => 289 - (289 * props.value / 100));</script>
-<template><div class="progress-ring"><svg viewBox="0 0 104 104" role="img" :aria-label="`${value}% ${label || 'complete'}`"><circle class="ring-bg" cx="52" cy="52" r="46"/><circle class="ring-value" cx="52" cy="52" r="46" :style="{ strokeDashoffset: offset }"/></svg><div><strong>{{ value }}%</strong><small>{{ label || 'complete' }}</small></div></div></template>
+<script setup lang="ts">
+import { computed } from 'vue';
+const props = defineProps<{ value: number; label?: string }>();
+const offset = computed(() => 289 - (289 * props.value) / 100);
+</script>
+<template>
+  <div class="progress-ring">
+    <svg viewBox="0 0 104 104" role="img" :aria-label="`${value}% ${label || 'complete'}`">
+      <circle class="ring-bg" cx="52" cy="52" r="46" />
+      <circle class="ring-value" cx="52" cy="52" r="46" :style="{ strokeDashoffset: offset }" />
+    </svg>
+    <div>
+      <strong>{{ value }}%</strong><small>{{ label || 'complete' }}</small>
+    </div>
+  </div>
+</template>

@@ -21,8 +21,10 @@ type Gateway struct {
 	Client          *http.Client
 }
 
+const maxModelResponseBytes = 2 << 20
+
 func New(base, key string, models map[string]string) *Gateway {
-	return &Gateway{BaseURL: strings.TrimRight(base, "/"), APIKey: key, Models: models, Client: &http.Client{Timeout: 30 * time.Second}}
+	return &Gateway{BaseURL: strings.TrimRight(base, "/"), APIKey: key, Models: models, Client: &http.Client{Timeout: 15 * time.Second}}
 }
 func (g *Gateway) Complete(ctx context.Context, r ports.LLMRequest) (ports.LLMResponse, error) {
 	model := r.Model
@@ -55,8 +57,7 @@ func (g *Gateway) Complete(ctx context.Context, r ports.LLMRequest) (ports.LLMRe
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		x, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return ports.LLMResponse{}, fmt.Errorf("model gateway %s: %s", resp.Status, string(x))
+		return ports.LLMResponse{}, fmt.Errorf("model gateway returned status %d", resp.StatusCode)
 	}
 	var out struct {
 		Model   string `json:"model"`
@@ -70,13 +71,24 @@ func (g *Gateway) Complete(ctx context.Context, r ports.LLMRequest) (ports.LLMRe
 			Completion int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err = json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return ports.LLMResponse{}, err
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxModelResponseBytes+1))
+	if err != nil {
+		return ports.LLMResponse{}, errors.New("unable to read model response")
+	}
+	if len(body) > maxModelResponseBytes {
+		return ports.LLMResponse{}, errors.New("model response is too large")
+	}
+	if err = json.Unmarshal(body, &out); err != nil {
+		return ports.LLMResponse{}, errors.New("model returned invalid JSON")
 	}
 	if len(out.Choices) == 0 {
 		return ports.LLMResponse{}, errors.New("model returned no choices")
 	}
-	return ports.LLMResponse{Content: out.Choices[0].Message.Content, InputTokens: out.Usage.Prompt, OutputTokens: out.Usage.Completion, Model: out.Model}, nil
+	content := strings.TrimSpace(out.Choices[0].Message.Content)
+	if content == "" {
+		return ports.LLMResponse{}, errors.New("model returned empty content")
+	}
+	return ports.LLMResponse{Content: content, InputTokens: out.Usage.Prompt, OutputTokens: out.Usage.Completion, Model: out.Model}, nil
 }
 
 type Fake struct{}

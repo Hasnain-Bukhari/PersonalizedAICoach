@@ -15,10 +15,11 @@ channels:
       workflowEvent: { $ref: '#/components/messages/WorkflowEvent' }
   interviewStream:
     address: /api/v1/interview/stream
-    description: WebSocket upgraded with interview_id and optional after_sequence query parameters.
+    description: WebSocket upgraded with interview_id and optional after_sequence query parameters. Candidate event IDs and client sequences are durably deduplicated across reconnects; every accepted or sequence-conflicting input receives a matching candidate.ack.
     messages:
       interviewClientEvent: { $ref: '#/components/messages/InterviewClientEvent' }
       interviewServerEvent: { $ref: '#/components/messages/InterviewServerEvent' }
+      candidateAck: { $ref: '#/components/messages/CandidateAck' }
 operations:
   receiveUserEvents:
     action: receive
@@ -30,7 +31,9 @@ operations:
   receiveInterviewOutput:
     action: receive
     channel: { $ref: '#/channels/interviewStream' }
-    messages: [{ $ref: '#/channels/interviewStream/messages/interviewServerEvent' }]
+    messages:
+      - { $ref: '#/channels/interviewStream/messages/interviewServerEvent' }
+      - { $ref: '#/channels/interviewStream/messages/candidateAck' }
 components:
   messages:
     WorkflowEvent:
@@ -44,6 +47,8 @@ components:
       payload: { $ref: '#/components/schemas/InterviewClientEnvelope' }
     InterviewServerEvent:
       payload: { $ref: '#/components/schemas/EventEnvelope' }
+    CandidateAck:
+      payload: { $ref: '#/components/schemas/CandidateAckEnvelope' }
   schemas:
     EventEnvelope:
       type: object
@@ -53,7 +58,23 @@ components:
         event_id: { type: string, format: uuid }
         type:
           type: string
-          enum: [workflow.planning, workflow.retrieving, workflow.lesson_generation, workflow.quiz_generation, workflow.validation, workflow.published, workflow.notified, workflow.failed, notification.created, interview.message, interview.state_changed, interview.scored, error]
+          enum:
+            [
+              workflow.planning,
+              workflow.retrieving,
+              workflow.lesson_generation,
+              workflow.quiz_generation,
+              workflow.validation,
+              workflow.published,
+              workflow.notified,
+              workflow.failed,
+              notification.created,
+              interview.message,
+              interview.state_changed,
+              interview.scored,
+              candidate.ack,
+              error,
+            ]
         workflow_id: { type: string, format: uuid }
         sequence: { type: integer, minimum: 1 }
         timestamp: { type: string, format: date-time }
@@ -64,10 +85,37 @@ components:
       required: [event_id, type, interview_id, sequence, timestamp, payload]
       properties:
         event_id: { type: string, format: uuid }
-        type: { type: string, enum: [candidate.message, candidate.finish, client.ack, client.ping] }
+        type: { type: string, enum: [candidate.message] }
         interview_id: { type: string, format: uuid }
-        sequence: { type: integer, minimum: 1, description: Monotonically increasing client sequence used for deduplication. }
+        sequence:
+          {
+            type: integer,
+            minimum: 1,
+            description: Monotonically increasing client sequence used for deduplication.,
+          }
         timestamp: { type: string, format: date-time }
         payload:
           type: object
-          properties: { content: { type: string, maxLength: 20000 }, acknowledged_sequence: { type: integer, minimum: 0 } }
+          additionalProperties: false
+          required: [content]
+          properties: { content: { type: string, minLength: 1, maxLength: 20000 } }
+    CandidateAckEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, workflow_id, sequence, timestamp, payload]
+      properties:
+        event_id: { type: string, format: uuid }
+        type: { type: string, enum: [candidate.ack] }
+        workflow_id: { type: string, format: uuid, description: Interview identifier. }
+        sequence: { type: integer, minimum: 1 }
+        timestamp: { type: string, format: date-time }
+        payload:
+          type: object
+          additionalProperties: false
+          required: [submitted_event_id, accepted, applied, next_sequence]
+          properties:
+            submitted_event_id: { type: string, format: uuid }
+            accepted: { type: boolean }
+            applied: { type: boolean }
+            next_sequence: { type: integer, minimum: 1 }
+            reason: { type: string, enum: [sequence_conflict] }

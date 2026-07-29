@@ -161,23 +161,23 @@ Added delivery artifacts include:
 
 ## Feature coverage
 
-| Capability | Current status | Notes |
-|---|---|---|
-| Daily session | Runnable | Synchronous in local memory profile; durable worker execution remains pending. |
-| Adaptive lesson | Runnable | Uses the model gateway with schema validation and deterministic fallback. |
-| Quiz and explanations | Runnable | Backend evaluation, mastery, SM-2, XP, and idempotency are implemented. |
-| Knowledge graph | Runnable foundation | Learner nodes update from quiz results; curriculum publication tooling remains pending. |
-| System-design interview | Runnable | Multi-stage WebSocket conversation and scorecard are implemented. |
-| Text/Markdown RAG | Runnable foundation | Tenant filtering, chunking, retrieval, and citations are implemented. |
-| PDF/DOCX/PPTX ingestion | Production integration required | Upload/status exists; isolated extraction, scanning, OCR, embeddings, and reranking remain. |
-| Analytics | Runnable foundation | Mastery, readiness, XP, streak, due reviews, and activity are available. |
-| Badges and levels | Schema/UI foundation | Award criteria and durable badge processing remain. |
-| In-app notifications | UI/schema foundation | Durable scheduling and dispatch remain. |
-| Email notifications | Infrastructure foundation | SES/Mailpit foundations exist; delivery adapter and templates remain. |
-| Auth0 and tenant boundaries | Implemented at API/schema level | Production persistence adapter must set RLS tenant context transactionally. |
-| PostgreSQL persistence | Schema complete | Runtime currently uses the in-memory adapter. |
-| Queue/outbox processing | Schema/infrastructure foundation | Worker consumer, retry, and DLQ replay implementation remain. |
-| AWS deployment | Foundation | Environment-specific IAM, ingress, DNS, certificates, image digests, and canary automation remain. |
+| Capability                  | Current status                   | Notes                                                                                              |
+| --------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Daily session               | Runnable                         | Synchronous in local memory profile; durable worker execution remains pending.                     |
+| Adaptive lesson             | Runnable                         | Uses the model gateway with schema validation and deterministic fallback.                          |
+| Quiz and explanations       | Runnable                         | Backend evaluation, mastery, SM-2, XP, and idempotency are implemented.                            |
+| Knowledge graph             | Runnable foundation              | Learner nodes update from quiz results; curriculum publication tooling remains pending.            |
+| System-design interview     | Runnable                         | Multi-stage WebSocket conversation and scorecard are implemented.                                  |
+| Text/Markdown RAG           | Runnable foundation              | Tenant filtering, chunking, retrieval, and citations are implemented.                              |
+| PDF/DOCX/PPTX ingestion     | Production integration required  | Upload/status exists; isolated extraction, scanning, OCR, embeddings, and reranking remain.        |
+| Analytics                   | Runnable foundation              | Mastery, readiness, XP, streak, due reviews, and activity are available.                           |
+| Badges and levels           | Schema/UI foundation             | Award criteria and durable badge processing remain.                                                |
+| In-app notifications        | UI/schema foundation             | Durable scheduling and dispatch remain.                                                            |
+| Email notifications         | Infrastructure foundation        | SES/Mailpit foundations exist; delivery adapter and templates remain.                              |
+| Auth0 and tenant boundaries | Implemented at API/schema level  | Production persistence adapter must set RLS tenant context transactionally.                        |
+| PostgreSQL persistence      | Schema complete                  | Runtime currently uses the in-memory adapter.                                                      |
+| Queue/outbox processing     | Schema/infrastructure foundation | Worker consumer, retry, and DLQ replay implementation remain.                                      |
+| AWS deployment              | Foundation                       | Environment-specific IAM, ingress, DNS, certificates, image digests, and canary automation remain. |
 
 ## Verification evidence
 
